@@ -5,73 +5,68 @@ from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import LSTM, Dropout, Dense, Input
 
-# Load the single dataset
-df = pd.read_csv('Google_Stock_Price.csv')  # <-- single file
+# Load single dataset
+df = pd.read_csv('Google_Stock_Price.csv')
 
-# Extract the 'Open' prices
-prices = df[['Open']]
+# Convert 'Open' column to numeric (in case of any text like 'GOOGL') and drop invalid rows
+df['Open'] = pd.to_numeric(df['Open'], errors='coerce')
+df = df.dropna(subset=['Open'])  # Drop rows with NaN in 'Open'
 
-# Scale the data between 0 and 1
+# Normalize the 'Open' column
 scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_prices = scaler.fit_transform(prices)
+scaled_data = scaler.fit_transform(df[['Open']].values)
 
-# Visualize the scaled prices
-plt.plot(scaled_prices)
+# Plot the scaled stock prices
+plt.plot(scaled_data)
 plt.title("Scaled Google Stock Prices")
 plt.xlabel("Time")
 plt.ylabel("Scaled Price")
 plt.show()
 
-# Split the data into training and testing
+# Prepare training and testing data
 time_step = 120
-train_size = int(len(scaled_prices) * 0.8)
-train_data = scaled_prices[:train_size]
-test_data = scaled_prices[train_size - time_step:]  # include back window
+x, y = [], []
+for i in range(time_step, len(scaled_data)):
+    x.append(scaled_data[i-time_step:i, 0])
+    y.append(scaled_data[i, 0])
 
-# Create sequences for LSTM
-def create_sequences(data, time_step=120):
-    x, y = [], []
-    for i in range(time_step, len(data)):
-        x.append(data[i-time_step:i, 0])
-        y.append(data[i, 0])
-    return np.array(x), np.array(y)
+x, y = np.array(x), np.array(y)
+x = np.reshape(x, (x.shape[0], x.shape[1], 1))
 
-x_train, y_train = create_sequences(train_data, time_step)
-x_test, y_test = create_sequences(test_data, time_step)
-
-# Reshape for LSTM input: (samples, time_steps, features)
-x_train = x_train.reshape((x_train.shape[0], x_train.shape[1], 1))
-x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 1))
+# Split into training and testing (e.g., last 20% for testing)
+split = int(0.8 * len(x))
+x_train, y_train = x[:split], y[:split]
+x_test, y_test = x[split:], y[split:]
 
 # Build the LSTM model
 model = Sequential([
     Input(shape=(x_train.shape[1], 1)),
-    LSTM(100, activation='tanh', return_sequences=True),
-    Dropout(0.3),
-    LSTM(100, activation='tanh'),
-    Dropout(0.3),
+    LSTM(100, activation='tanh', return_sequences=True), Dropout(0.3),
+    LSTM(100, activation='tanh'), Dropout(0.3),
     Dense(1)
 ])
 
+# Compile and summarize the model
 model.compile(optimizer='adam', loss='mae')
 model.summary()
 
 # Train the model
 model.fit(x_train, y_train, epochs=200, batch_size=50, validation_split=0.05)
 
-# Predict using the test set
+# Predict and inverse transform the scaled values
 y_pred = model.predict(x_test)
-y_pred = scaler.inverse_transform(y_pred)  # convert back to original scale
+y_pred_actual = scaler.inverse_transform(y_pred.reshape(-1, 1))
 y_test_actual = scaler.inverse_transform(y_test.reshape(-1, 1))
 
-# Evaluate model
-output = model.evaluate(x_test, y_test)
+# Evaluate the model
+loss = model.evaluate(x_test, y_test)
 
 # Plot the results
 plt.plot(y_test_actual, color='red', label='Real Stock Price')
-plt.plot(y_pred, color='blue', label='Predicted Stock Price')
+plt.plot(y_pred_actual, color='blue', label='Predicted Stock Price')
 plt.title('Google Stock Price Prediction')
 plt.xlabel('Time')
 plt.ylabel('Price')
 plt.legend()
 plt.show()
+
